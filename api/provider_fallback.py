@@ -17,6 +17,7 @@ from .models.anthropic import MessagesRequest
 
 CLOUD_PROVIDER_IDS = frozenset({"nvidia_nim", "open_router", "deepseek"})
 FIRST_CONTENT_TIMEOUT_SECONDS = 20
+NVIDIA_FIRST_CONTENT_TIMEOUT_SECONDS = 60
 ProviderGetter = Callable[[str], BaseProvider]
 
 
@@ -119,7 +120,12 @@ async def stream_with_provider_fallback(
                 request_id=f"{request_id}_{provider_id}",
                 thinking_enabled=thinking_enabled,
             ).__aiter__()
-            deadline = asyncio.get_running_loop().time() + FIRST_CONTENT_TIMEOUT_SECONDS
+            first_content_timeout = (
+                NVIDIA_FIRST_CONTENT_TIMEOUT_SECONDS
+                if provider_id == "nvidia_nim"
+                else FIRST_CONTENT_TIMEOUT_SECONDS
+            )
+            deadline = asyncio.get_running_loop().time() + first_content_timeout
 
             while not committed:
                 remaining = deadline - asyncio.get_running_loop().time()
