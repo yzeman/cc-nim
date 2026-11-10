@@ -43,7 +43,10 @@ async def handle_providers_command(
         if status == "working":
             icon = "✅"
             label = "Working"
-            details = f"first text in {result['first_token_ms']} ms"
+            details = (
+                f"model {result['model']}; first text in "
+                f"{result['first_token_ms']} ms"
+            )
             if result.get("latency_ms") is not None:
                 details += f", finished in {result['latency_ms']} ms"
             details += f", {result['text_chunks']} text chunk(s)"
@@ -59,6 +62,8 @@ async def handle_providers_command(
             icon = "❌"
             label = "Failed"
             details = result["reason"]
+            if result.get("model"):
+                details = f"model {result['model']}; {details}"
 
         lines.append(
             f"{icon} {ctx.bold(ctx.escape_text(provider))} — "
