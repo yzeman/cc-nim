@@ -71,7 +71,7 @@ async def anthropic_json_response(
         if not data_lines:
             continue
         try:
-            payload = json.loads("\\n".join(data_lines))
+            payload = json.loads("\n".join(data_lines))
         except (TypeError, ValueError):
             continue
         if not isinstance(payload, dict):
