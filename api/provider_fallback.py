@@ -163,6 +163,23 @@ async def stream_with_provider_fallback(
                 continue
 
         except Exception as exc:
+            if committed:
+                logger.error(
+                    "PROVIDER_STREAM_FAILED_AFTER_CONTENT: provider={} exc_type={}",
+                    provider_id,
+                    type(exc).__name__,
+                )
+                yield format_sse_event(
+                    "error",
+                    {
+                        "type": "error",
+                        "error": {
+                            "type": "api_error",
+                            "message": "The selected provider stopped after beginning its response.",
+                        },
+                    },
+                )
+                return
             last_uncommitted_events = buffered
             logger.warning(
                 "PROVIDER_FALLBACK: provider={} failed before first content exc_type={}",
