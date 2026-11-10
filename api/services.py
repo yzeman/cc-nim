@@ -21,6 +21,7 @@ from .model_router import ModelRouter
 from .models.anthropic import MessagesRequest, TokenCountRequest
 from .models.responses import TokenCountResponse
 from .optimization_handlers import try_optimizations
+from .provider_fallback import stream_with_provider_fallback
 from .web_tools.egress import WebFetchEgressPolicy
 from .web_tools.request import (
     is_web_server_tool_request,
@@ -137,16 +138,11 @@ class ClaudeProxyService:
                 return optimized
             logger.debug("No optimization matched, routing to provider")
 
-            provider = self._provider_getter(routed.resolved.provider_id)
-            provider.preflight_stream(
-                routed.request,
-                thinking_enabled=routed.resolved.thinking_enabled,
-            )
-
             request_id = f"req_{uuid.uuid4().hex[:12]}"
             logger.info(
-                "API_REQUEST: request_id={} model={} messages={}",
+                "API_REQUEST: request_id={} provider={} model={} messages={}",
                 request_id,
+                routed.resolved.provider_id,
                 routed.request.model,
                 len(routed.request.messages),
             )
@@ -159,8 +155,12 @@ class ClaudeProxyService:
                 routed.request.messages, routed.request.system, routed.request.tools
             )
             return anthropic_sse_streaming_response(
-                provider.stream_response(
+                stream_with_provider_fallback(
                     routed.request,
+                    primary_provider_id=routed.resolved.provider_id,
+                    primary_model=routed.resolved.provider_model,
+                    settings=self._settings,
+                    provider_getter=self._provider_getter,
                     input_tokens=input_tokens,
                     request_id=request_id,
                     thinking_enabled=routed.resolved.thinking_enabled,
