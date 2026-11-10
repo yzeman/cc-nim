@@ -8,11 +8,11 @@ import time
 import uuid
 from typing import Any
 
+from api.models.anthropic import Message, MessagesRequest
 from config.provider_catalog import PROVIDER_CATALOG
 from config.settings import Settings, get_settings
 from providers.exceptions import AuthenticationError
 from providers.registry import build_provider_config, create_provider
-from api.models.anthropic import Message, MessagesRequest
 
 
 CLOUD_PROVIDER_IDS = ("nvidia_nim", "open_router", "deepseek")
