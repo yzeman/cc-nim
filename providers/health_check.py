@@ -132,11 +132,6 @@ async def check_cloud_provider(
             ):
                 event_name, payload = _parse_sse_event(raw_event)
                 if event_name == "error" or (payload and payload.get("type") == "error"):
-                    error_type = (
-                        (payload or {}).get("error", {}).get("type", "provider_error")
-                        if isinstance((payload or {}).get("error", {}), dict)
-                        else "provider_error"
-                    )
                     result["reason"] = _safe_provider_error(payload)
                     return result
 
