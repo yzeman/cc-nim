@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import json
 import traceback
 import uuid
 from collections.abc import AsyncIterator, Callable
 from typing import Any
 
 from fastapi import HTTPException
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from loguru import logger
 
 from config.settings import Settings
@@ -45,6 +46,122 @@ def anthropic_sse_streaming_response(
         body,
         media_type="text/event-stream",
         headers=ANTHROPIC_SSE_RESPONSE_HEADERS,
+    )
+
+
+
+async def anthropic_json_response(
+    body: AsyncIterator[str], *, fallback_model: str
+) -> JSONResponse:
+    """Collect Anthropic SSE events into the JSON response required by stream=false."""
+    message: dict[str, Any] = {}
+    blocks: dict[int, dict[str, Any]] = {}
+    tool_json: dict[int, str] = {}
+    stop_reason: str | None = None
+    usage: dict[str, int] = {"input_tokens": 0, "output_tokens": 0}
+
+    async for raw_event in body:
+        event_name: str | None = None
+        data_lines: list[str] = []
+        for line in raw_event.splitlines():
+            if line.startswith("event:"):
+                event_name = line.partition(":")[2].strip()
+            elif line.startswith("data:"):
+                data_lines.append(line.partition(":")[2].strip())
+        if not data_lines:
+            continue
+        try:
+            payload = json.loads("\\n".join(data_lines))
+        except (TypeError, ValueError):
+            continue
+        if not isinstance(payload, dict):
+            continue
+
+        if event_name == "error" or payload.get("type") == "error":
+            error = payload.get("error") or {}
+            return JSONResponse(
+                status_code=502,
+                content={
+                    "type": "error",
+                    "error": {
+                        "type": error.get("type", "api_error"),
+                        "message": error.get("message", "All providers failed."),
+                    },
+                },
+            )
+        if event_name == "message_start":
+            message = payload.get("message") or {}
+            start_usage = message.get("usage") or {}
+            usage["input_tokens"] = int(start_usage.get("input_tokens") or 0)
+        elif event_name == "content_block_start":
+            index = payload.get("index")
+            block = payload.get("content_block")
+            if isinstance(index, int) and isinstance(block, dict):
+                blocks[index] = dict(block)
+                if block.get("type") == "tool_use":
+                    tool_json[index] = ""
+        elif event_name == "content_block_delta":
+            index = payload.get("index")
+            delta = payload.get("delta") or {}
+            if not isinstance(index, int) or not isinstance(delta, dict):
+                continue
+            block = blocks.get(index)
+            if block is None:
+                continue
+            delta_type = delta.get("type")
+            if delta_type == "text_delta":
+                block["text"] = block.get("text", "") + str(delta.get("text", ""))
+            elif delta_type == "thinking_delta":
+                block["thinking"] = block.get("thinking", "") + str(delta.get("thinking", ""))
+            elif delta_type == "signature_delta":
+                block["signature"] = block.get("signature", "") + str(delta.get("signature", ""))
+            elif delta_type == "input_json_delta":
+                tool_json[index] = tool_json.get(index, "") + str(delta.get("partial_json", ""))
+        elif event_name == "message_delta":
+            delta = payload.get("delta") or {}
+            stop_reason = delta.get("stop_reason")
+            final_usage = payload.get("usage") or {}
+            usage["output_tokens"] = int(final_usage.get("output_tokens") or 0)
+            usage["input_tokens"] = int(final_usage.get("input_tokens") or usage["input_tokens"])
+
+    if not message.get("id"):
+        return JSONResponse(
+            status_code=502,
+            content={
+                "type": "error",
+                "error": {
+                    "type": "api_error",
+                    "message": "Provider stream ended without a complete Anthropic message.",
+                },
+            },
+        )
+
+    content: list[dict[str, Any]] = []
+    for index in sorted(blocks):
+        block = blocks[index]
+        if block.get("type") == "tool_use":
+            try:
+                block["input"] = json.loads(tool_json.get(index, "") or "{}")
+            except (TypeError, ValueError):
+                block["input"] = {}
+        content.append(block)
+
+    return JSONResponse(
+        content={
+            "id": message["id"],
+            "type": "message",
+            "role": "assistant",
+            "model": message.get("model") or fallback_model,
+            "content": content,
+            "stop_reason": stop_reason,
+            "stop_sequence": None,
+            "usage": {
+                "input_tokens": usage["input_tokens"],
+                "output_tokens": usage["output_tokens"],
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 0,
+            },
+        }
     )
 
 
