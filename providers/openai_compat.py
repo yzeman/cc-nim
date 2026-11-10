@@ -351,13 +351,10 @@ class OpenAIChatTransport(BaseProvider):
                 )
                 for event in sse.close_all_blocks():
                     yield event
-                if sse.blocks.has_emitted_tool_block():
-                    # Avoid a second assistant text block after an emitted tool_use, which
-                    # breaks OpenAI history replay (issue #206) when Claude Code stores it.
-                    yield sse.emit_top_level_error(error_message)
-                else:
-                    for event in sse.emit_error(error_message):
-                        yield event
+                # Keep transport failures as top-level SSE errors. The API's provider
+                # fallback layer must see an error event, not mistake the error text
+                # for the first assistant content delta and commit to this provider.
+                yield sse.emit_top_level_error(error_message)
                 yield sse.message_delta("end_turn", 1)
                 yield sse.message_stop()
                 return
