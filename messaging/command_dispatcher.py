@@ -6,6 +6,7 @@ from typing import Any
 
 from .commands import handle_clear_command, handle_stats_command, handle_stop_command
 from .models import IncomingMessage
+from .provider_status import handle_providers_command
 
 
 def parse_command_base(text: str | None) -> str:
@@ -30,6 +31,7 @@ async def dispatch_command(
         "/clear": handle_clear_command,
         "/stop": handle_stop_command,
         "/stats": handle_stats_command,
+        "/providers": handle_providers_command,
     }
     command = commands.get(command_base)
     if command is None:
