@@ -9,6 +9,7 @@ included at top level for easy grep/filter.
 import json
 import logging
 import re
+import sys
 from pathlib import Path
 
 from loguru import logger
@@ -77,7 +78,7 @@ class InterceptHandler(logging.Handler):
 def configure_logging(
     log_file: str, *, force: bool = False, verbose_third_party: bool = False
 ) -> None:
-    """Configure loguru with JSON output to log_file and intercept stdlib logging.
+    """Configure loguru with JSON output to log_file, stderr, and intercepted stdlib logging.
 
     Idempotent: skips if already configured (e.g. hot reload).
     Use force=True to reconfigure (e.g. in tests with a different log path).
@@ -105,6 +106,9 @@ def configure_logging(
         mode="a",
         rotation="50 MB",
     )
+
+    # Also emit redacted JSON logs to stderr so Render captures application diagnostics.
+    logger.add(sys.stderr, level="DEBUG", format=_serialize_with_context)
 
     # Intercept stdlib logging: route all root logger output to loguru
     intercept = InterceptHandler()
