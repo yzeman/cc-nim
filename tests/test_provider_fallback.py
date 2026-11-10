@@ -1,8 +1,8 @@
 import pytest
 
+from api.models.anthropic import Message, MessagesRequest
 from config.settings import Settings
 from core.anthropic.sse import format_sse_event
-from api.models.anthropic import Message, MessagesRequest
 from api.provider_fallback import stream_with_provider_fallback
 
 
