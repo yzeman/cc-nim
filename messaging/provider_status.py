@@ -30,6 +30,11 @@ async def handle_providers_command(
         message_thread_id=incoming.message_thread_id,
     )
 
+    if waiting_id:
+        handler.record_outgoing_message(
+            incoming.platform, incoming.chat_id, waiting_id, "command"
+        )
+
     results = await check_configured_cloud_providers()
     lines = ["🩺 " + ctx.bold("Cloud provider health")]
     for result in results:
