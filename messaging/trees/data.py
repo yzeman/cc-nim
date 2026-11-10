@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """Tree data structures for message queue.
 
 Contains MessageState, MessageNode, and MessageTree classes.
