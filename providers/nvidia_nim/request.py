@@ -146,12 +146,13 @@ def build_request_body(
     if request_extra:
         extra_body.update(request_extra)
 
-    if thinking_enabled:
-        chat_template_kwargs = extra_body.setdefault(
-            "chat_template_kwargs", {"thinking": True, "enable_thinking": True}
-        )
-        if isinstance(chat_template_kwargs, dict):
-            chat_template_kwargs.setdefault("reasoning_budget", max_tokens)
+    # GLM-5.3-Flash always reasons. NVIDIA documents reasoning_effort=low
+    # as the supported way to reduce first-token latency; enable_thinking=false
+    # does not disable reasoning for this model.
+    chat_template_kwargs = extra_body.setdefault("chat_template_kwargs", {})
+    if isinstance(chat_template_kwargs, dict):
+        chat_template_kwargs.setdefault("reasoning_effort", "low")
+        chat_template_kwargs.setdefault("clear_thinking", True)
 
     req_top_k = getattr(request_data, "top_k", None)
     top_k = req_top_k if req_top_k is not None else nim.top_k
