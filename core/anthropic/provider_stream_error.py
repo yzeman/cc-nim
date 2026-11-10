@@ -29,6 +29,8 @@ def iter_provider_stream_error_sse_events(
     )
     if not sent_any_event:
         yield sse.message_start()
-    yield from sse.emit_error(error_message)
+    # Keep transport failures out of assistant text. The API fallback layer must
+    # be able to distinguish a failed provider from a real answer beginning.
+    yield sse.emit_top_level_error(error_message)
     yield sse.message_delta("end_turn", 1)
     yield sse.message_stop()
