@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from collections.abc import AsyncIterator, Callable
 from typing import Any
@@ -15,6 +16,7 @@ from .models.anthropic import MessagesRequest
 
 
 CLOUD_PROVIDER_IDS = frozenset({"nvidia_nim", "open_router", "deepseek"})
+FIRST_CONTENT_TIMEOUT_SECONDS = 20
 ProviderGetter = Callable[[str], BaseProvider]
 
 
@@ -55,7 +57,7 @@ def _event_details(raw_event: str) -> tuple[str | None, dict[str, Any] | None]:
     if not data_lines:
         return event_name, None
     try:
-        payload = json.loads("\n".join(data_lines))
+        payload = json.loads("\\n".join(data_lines))
     except (TypeError, ValueError):
         return event_name, None
     return event_name, payload if isinstance(payload, dict) else None
@@ -92,10 +94,9 @@ async def stream_with_provider_fallback(
 ) -> AsyncIterator[str]:
     """Stream from the first provider that starts producing content.
 
-    Events are buffered until the first content delta. If a provider errors before
-    that point, its partial envelope is discarded and the next provider is tried.
-    Once content starts, the stream is committed to that provider to avoid mixing
-    or duplicating two different answers.
+    Events are buffered until the first content delta. A provider that errors or
+    produces no content within the first-token deadline is skipped. Once content
+    starts, the stream is committed to that provider to avoid mixing answers.
     """
     candidates = _provider_candidates(settings, primary_provider_id, primary_model)
     last_uncommitted_events: list[str] = []
@@ -103,6 +104,7 @@ async def stream_with_provider_fallback(
     for index, (provider_id, model_name) in enumerate(candidates):
         buffered: list[str] = []
         committed = False
+        stream = None
         try:
             provider = provider_getter(provider_id)
             provider_request = request.model_copy(
@@ -111,24 +113,29 @@ async def stream_with_provider_fallback(
             provider.preflight_stream(
                 provider_request, thinking_enabled=thinking_enabled
             )
-            async for raw_event in provider.stream_response(
+            stream = provider.stream_response(
                 provider_request,
                 input_tokens=input_tokens,
                 request_id=f"{request_id}_{provider_id}",
                 thinking_enabled=thinking_enabled,
-            ):
+            ).__aiter__()
+            deadline = asyncio.get_running_loop().time() + FIRST_CONTENT_TIMEOUT_SECONDS
+
+            while not committed:
+                remaining = deadline - asyncio.get_running_loop().time()
+                if remaining <= 0:
+                    raise TimeoutError("Provider produced no content before first-token deadline")
+                try:
+                    async with asyncio.timeout(remaining):
+                        raw_event = await anext(stream)
+                except StopAsyncIteration:
+                    break
+
                 event_name, payload = _event_details(raw_event)
                 if _is_error_event(event_name, payload):
-                    if not committed:
-                        buffered.append(raw_event)
-                        last_uncommitted_events = buffered
-                        break
-                    yield raw_event
-                    return
-
-                if committed:
-                    yield raw_event
-                    continue
+                    buffered.append(raw_event)
+                    last_uncommitted_events = buffered
+                    break
 
                 buffered.append(raw_event)
                 if _is_first_content_event(payload):
@@ -138,6 +145,12 @@ async def stream_with_provider_fallback(
                     buffered.clear()
 
             if committed:
+                async for raw_event in stream:
+                    event_name, payload = _event_details(raw_event)
+                    if _is_error_event(event_name, payload):
+                        yield raw_event
+                        return
+                    yield raw_event
                 return
 
             last_uncommitted_events = buffered
@@ -151,23 +164,6 @@ async def stream_with_provider_fallback(
 
         except Exception as exc:
             last_uncommitted_events = buffered
-            if committed:
-                logger.error(
-                    "PROVIDER_STREAM_FAILED_AFTER_CONTENT: provider={} exc_type={}",
-                    provider_id,
-                    type(exc).__name__,
-                )
-                yield format_sse_event(
-                    "error",
-                    {
-                        "type": "error",
-                        "error": {
-                            "type": "api_error",
-                            "message": "The selected provider stopped after beginning its response.",
-                        },
-                    },
-                )
-                return
             logger.warning(
                 "PROVIDER_FALLBACK: provider={} failed before first content exc_type={}",
                 provider_id,
@@ -175,6 +171,9 @@ async def stream_with_provider_fallback(
             )
             if index < len(candidates) - 1:
                 continue
+        finally:
+            if stream is not None:
+                await stream.aclose()
 
     if last_uncommitted_events:
         for pending_event in last_uncommitted_events:
