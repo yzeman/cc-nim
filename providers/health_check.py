@@ -37,6 +37,27 @@ def _configured_cloud_models(settings: Settings) -> dict[str, str]:
     return result
 
 
+def _safe_provider_error(payload: dict[str, Any] | None) -> str:
+    """Classify common upstream failures without exposing raw provider messages."""
+    error = (payload or {}).get("error", {})
+    if not isinstance(error, dict):
+        return "Provider returned an API error."
+    kind = str(error.get("type", "")).lower()
+    message = str(error.get("message", "")).lower()
+    combined = f"{kind} {message}"
+    if any(term in combined for term in ("401", "403", "authentication", "unauthorized", "invalid api key")):
+        return "API key was rejected."
+    if any(term in combined for term in ("410", "model not found", "model unavailable", "retired")):
+        return "Selected model is unavailable or retired."
+    if any(term in combined for term in ("429", "rate limit", "too many requests")):
+        return "Provider rate limit was reached."
+    if any(term in combined for term in ("timeout", "timed out")):
+        return "Provider did not respond before the timeout."
+    if any(term in combined for term in ("503", "502", "overloaded", "capacity")):
+        return "Provider is temporarily overloaded."
+    return "Provider returned an API error."
+
+
 def _parse_sse_event(raw_event: str) -> tuple[str | None, dict[str, Any] | None]:
     """Parse one complete Anthropic SSE event."""
     event_name: str | None = None
@@ -116,7 +137,7 @@ async def check_cloud_provider(
                         if isinstance((payload or {}).get("error", {}), dict)
                         else "provider_error"
                     )
-                    result["reason"] = f"Provider returned an API error ({error_type})."
+                    result["reason"] = _safe_provider_error(payload)
                     return result
 
                 delta = (payload or {}).get("delta", {})
