@@ -23,6 +23,7 @@ COPY --chown=app:app messaging ./messaging
 COPY --chown=app:app providers ./providers
 COPY --chown=app:app server.py ./
 COPY --chown=app:app .env.example ./
+RUN chown app:app /app
 
 USER app
 ENV HOME=/home/app \
