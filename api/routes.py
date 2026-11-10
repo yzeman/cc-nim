@@ -10,7 +10,7 @@ from . import dependencies
 from .dependencies import get_settings, require_api_key
 from .models.anthropic import MessagesRequest, TokenCountRequest
 from .models.responses import ModelResponse, ModelsListResponse
-from .services import ClaudeProxyService
+from .services import ClaudeProxyService, anthropic_json_response
 
 router = APIRouter()
 
@@ -82,8 +82,13 @@ async def create_message(
     service: ClaudeProxyService = Depends(get_proxy_service),
     _auth=Depends(require_api_key),
 ):
-    """Create a message (always streaming)."""
-    return service.create_message(request_data)
+    """Create a message using the requested streaming mode."""
+    response = service.create_message(request_data)
+    if request_data.stream is False and hasattr(response, "body_iterator"):
+        return await anthropic_json_response(
+            response.body_iterator, fallback_model=request_data.model
+        )
+    return response
 
 
 @router.api_route("/v1/messages", methods=["HEAD", "OPTIONS"])
