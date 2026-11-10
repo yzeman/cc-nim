@@ -2,9 +2,6 @@
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator
 
-from config.constants import ANTHROPIC_DEFAULT_MAX_OUTPUT_TOKENS
-
-
 class NimSettings(BaseModel):
     """Fixed NVIDIA NIM settings (not configurable via env)."""
 
@@ -16,7 +13,7 @@ class NimSettings(BaseModel):
     )
     top_k: int = -1
     max_tokens: int = Field(
-        ANTHROPIC_DEFAULT_MAX_OUTPUT_TOKENS,
+        8192,
         ge=1,
         description="Maximum number of tokens in output.",
     )
@@ -82,12 +79,12 @@ class NimSettings(BaseModel):
     @classmethod
     def validate_int_fields(cls, v, info: ValidationInfo):
         field_defaults = {
-            "max_tokens": ANTHROPIC_DEFAULT_MAX_OUTPUT_TOKENS,
+            "max_tokens": 8192,
             "min_tokens": 0,
         }
         if v is None or v == "":
             key = info.field_name or "max_tokens"
-            return field_defaults.get(key, ANTHROPIC_DEFAULT_MAX_OUTPUT_TOKENS)
+            return field_defaults.get(key, 8192)
         try:
             val = int(v)
         except (TypeError, ValueError) as err:
