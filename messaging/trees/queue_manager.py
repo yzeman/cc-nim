@@ -1,5 +1,7 @@
 """Tree-based message queue: index, async node processor, and public manager API."""
 
+from __future__ import annotations
+
 import asyncio
 from collections.abc import Awaitable, Callable
 
